@@ -310,41 +310,6 @@ class BinaryOperations:
         """Public wrapper to register a BinaryView and return its id."""
         return self._register_view(bv)
 
-    def unregister_by_filename(self, filename: str) -> int:
-        """Remove all tracked views that match the given absolute filename.
-
-        Returns number of entries removed.
-        """
-        if not filename:
-            return 0
-        self._prune_views()
-        to_delete: list[str] = []
-        for vid, w in list(self._views_by_id.items()):
-            try:
-                vb = w()
-            except Exception:
-                vb = None
-            if vb is None:
-                continue
-            try:
-                fn = getattr(vb.file, "filename", None)
-            except Exception:
-                fn = None
-            if fn == filename:
-                to_delete.append(vid)
-        for vid in to_delete:
-            self._views_by_id.pop(vid, None)
-        # Rebuild filename map and clear current_view if it matched
-        try:
-            cur_fn = None
-            if self._current_view and getattr(self._current_view, "file", None):
-                cur_fn = getattr(self._current_view.file, "filename", None)
-            if cur_fn == filename:
-                self._current_view = None
-        except Exception:
-            self._current_view = None
-        self._prune_views()
-        return len(to_delete)
 
     def list_open_binaries(self) -> list[dict[str, str]]:
         """Return a list of managed/open binaries with ids.

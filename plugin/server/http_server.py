@@ -312,39 +312,6 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
                         bn.log_error(f"Error loading binary: {e}")
                         self._send_json_response({"error": str(e)}, 500)
 
-            elif path == "/closeBinary":
-                ident = (
-                    params.get("view")
-                    or params.get("binary")
-                    or params.get("id")
-                    or params.get("file")
-                )
-                if not ident:
-                    self._send_json_response(
-                        {
-                            "error": "Missing parameter",
-                            "help": "Use ?view=<id|filename> to close a binary",
-                        },
-                        400,
-                    )
-                else:
-                    try:
-                        view_info = self.binary_ops.select_view(ident)
-                        if not view_info:
-                            self._send_json_response({
-                                "error": f"Binary not found: {ident}",
-                                "available": self.endpoints.list_binaries().get("binaries", []),
-                            }, 404)
-                        else:
-                            filename = view_info.get("filename")
-                            self.binary_ops.unregister_by_filename(filename)
-                            self._send_json_response({
-                                "status": "ok",
-                                "message": f"Successfully closed {filename}"
-                            })
-                    except Exception as e:
-                        bn.log_error(f"Error closing binary: {e}")
-                        self._send_json_response({"error": str(e)}, 500)
 
             elif path == "/exports":
                 exports = self.endpoints.get_exports(offset, limit)
