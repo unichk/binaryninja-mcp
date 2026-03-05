@@ -302,9 +302,10 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
                 else:
                     try:
                         bv = self.binary_ops.load_binary(file_path)
+                        filename = bv.file.filename if bv and hasattr(bv, 'file') and bv.file else file_path
                         self._send_json_response({
                             "status": "ok",
-                            "filename": bv.file.filename if bv else None,
+                            "filename": filename,
                             "message": f"Successfully loaded {file_path}"
                         })
                     except Exception as e:

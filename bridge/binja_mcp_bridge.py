@@ -664,7 +664,7 @@ def load_binary(path: str) -> str:
     """
     Load a binary file from a file path into Binary Ninja.
     """
-    data = get_json("loadBinary", {"path": path})
+    data = get_json("loadBinary", {"path": path}, timeout=None)
     if not data:
         return "Error: no response"
     if isinstance(data, dict) and data.get("error"):

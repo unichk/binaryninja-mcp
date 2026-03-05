@@ -29,51 +29,121 @@ class BinaryOperations:
     def current_view(self, bv: bn.BinaryView | None):
         self._current_view = bv
         if bv:
-            bn.log_info(f"Set current binary view: {bv.file.filename}")
+            filepath = bv.file.filename
+            bn.log_info(f"Set current binary view: {filepath}")
             try:
                 self._register_view(bv)
             except Exception:
                 pass
+
+            # Attempt to switch UI tab to match selection
+            try:
+                import binaryninjaui
+                def _switch_ui_tab():
+                    bn.log_info(f"Checking UI focus for {filepath}")
+                    contexts = binaryninjaui.UIContext.allContexts()
+                    if contexts:
+                        context = contexts[0]
+                        # PREVENT LOOP: Check if this file is already active in the UI
+                        view_frame = context.getCurrentViewFrame()
+                        if view_frame:
+                            current_bv = view_frame.getCurrentBinaryView()
+                            if current_bv and current_bv.file.filename == filepath:
+                                bn.log_debug(f"UI already focused on {filepath}, skipping switch")
+                                return
+                        
+                        bn.log_info(f"Switching UI focus to {filepath}")
+                        context.openFilename(filepath)
+
+                if hasattr(bn, "mainthread") and hasattr(bn.mainthread, "execute_on_main_thread"):
+                    bn.mainthread.execute_on_main_thread(_switch_ui_tab)
+                else:
+                    _switch_ui_tab()
+            except ImportError:
+                pass
+            except Exception as e:
+                bn.log_error(f"Failed to switch UI tab: {e}")
         else:
             bn.log_info("Cleared current binary view")
 
     def load_binary(self, filepath: str) -> bn.BinaryView:
-        """Load a binary file using the appropriate method based on the Binary Ninja API version"""
-        try:
-            if hasattr(bn, "open_view"):
-                bn.log_info("Using bn.open_view method")
-                self._current_view = bn.open_view(filepath)
-            elif hasattr(bn, "BinaryViewType") and hasattr(bn.BinaryViewType, "get_view_of_file"):
-                bn.log_info("Using BinaryViewType.get_view_of_file method")
-                file_metadata = bn.FileMetadata()
-                try:
-                    if hasattr(bn.BinaryViewType, "get_default_options"):
-                        options = bn.BinaryViewType.get_default_options()
-                        self._current_view = bn.BinaryViewType.get_view_of_file(
-                            filepath, file_metadata, options
-                        )
-                    else:
-                        self._current_view = bn.BinaryViewType.get_view_of_file(
-                            filepath, file_metadata
-                        )
-                except TypeError:
-                    self._current_view = bn.BinaryViewType.get_view_of_file(filepath)
-            else:
-                bn.log_info("Using legacy method")
-                file_metadata = bn.FileMetadata()
-                binary_view_type = bn.BinaryViewType.get_view_of_file_with_options(
-                    filepath, file_metadata
-                )
-                if binary_view_type:
-                    self._current_view = binary_view_type.open()
-                else:
-                    raise Exception("No view type available for this file")
+        """Load a binary file while preventing redundant opens and double-loading."""
+        # 1. Check if we already have this file open
+        self._prune_views()
+        existing_id = self._id_by_filename.get(filepath)
+        if existing_id:
+            w = self._views_by_id.get(existing_id)
+            if w:
+                bv = w()
+                if bv:
+                    bn.log_info(f"File {filepath} already open, returning existing view")
+                    self.current_view = bv
+                    return bv
 
+        self._current_view = None
+        try:
+            # 2. Try UI opening first
+            ui_success = False
             try:
-                if self._current_view is not None:
-                    self._register_view(self._current_view)
-            except Exception:
-                pass
+                import binaryninjaui
+                def _open_ui_tab():
+                    bn.log_info(f"Opening {filepath} in UI tab")
+                    contexts = binaryninjaui.UIContext.allContexts()
+                    if contexts:
+                        context = contexts[0]
+                        context.openFilename(filepath)
+                    else:
+                        bn.log_warn("No UI contexts available to open tab")
+
+                if hasattr(bn, "mainthread") and hasattr(bn.mainthread, "execute_on_main_thread"):
+                    bn.log_info("Queuing UI tab open on main thread")
+                    bn.mainthread.execute_on_main_thread(_open_ui_tab)
+                    ui_success = True
+                else:
+                    _open_ui_tab()
+                    ui_success = True
+            except (ImportError, Exception) as e:
+                bn.log_info(f"UI loading unavailable or failed: {e}")
+
+            # 3. Handle BinaryView acquisition
+            if ui_success:
+                import time
+                bn.log_info(f"Waiting for {filepath} to be registered via UI...")
+                max_retries = 30
+                for i in range(max_retries):
+                    self._prune_views()
+                    vid = self._id_by_filename.get(filepath)
+                    if vid:
+                        wref = self._views_by_id.get(vid)
+                        bv = wref() if wref else None
+                        if bv:
+                            bn.log_info(f"Discovered {filepath} registered via UI after {i*0.1:.2f}s")
+                            self._current_view = bv
+                            break
+                    time.sleep(0.1)
+
+            # 4. Fallback: Core loading if UI failed or view wasn't discovered
+            if not self._current_view:
+                bn.log_info(f"Loading {filepath} via core API (fallback)")
+                if hasattr(bn, "load"):
+                    self._current_view = bn.load(filepath)
+                elif hasattr(bn, "open_view"):
+                    self._current_view = bn.open_view(filepath)
+                
+                # Double fallback for older versions
+                if not self._current_view:
+                    file_metadata = bn.FileMetadata()
+                    if hasattr(bn.BinaryViewType, "get_view_of_file_with_options"):
+                        bvt = bn.BinaryViewType.get_view_of_file_with_options(filepath, file_metadata)
+                        if bvt:
+                            self._current_view = bvt.open()
+
+            # 5. Finalize
+            if self._current_view:
+                self._register_view(self._current_view)
+                # Ensure analysis is complete
+                self._current_view.update_analysis_and_wait()
+            
             return self._current_view
         except Exception as e:
             bn.log_error(f"Failed to load binary: {e}")

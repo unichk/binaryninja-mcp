@@ -94,6 +94,10 @@ def _register_settings():
         "mcp.showStatusButton",
         '{ "title": "Show Status Button", "type": "boolean", "default": true, "description": "Show MCP server status button in the status bar." }',
     )
+    settings.register_setting(
+        "mcp.autoStart",
+        '{ "title": "Auto-start Server", "type": "boolean", "default": true, "description": "Automatically start the MCP server when Binary Ninja launches." }',
+    )
 
 
 _register_settings()
@@ -105,6 +109,11 @@ def _apply_settings_to_config():
 
 def _try_autostart_for_bv(bv):
     try:
+        # Respect auto-start setting
+        settings = Settings()
+        if not settings.get_bool("mcp.autoStart"):
+            return
+
         # Respect manual stop; do not auto-start until user starts explicitly
         global _mcp_user_stopped
         if _mcp_user_stopped:
@@ -118,6 +127,11 @@ def _try_autostart_for_bv(bv):
 def _try_autostart_no_bv():
     """Auto-start the server without requiring an open binary view."""
     try:
+        # Respect auto-start setting
+        settings = Settings()
+        if not settings.get_bool("mcp.autoStart"):
+            return
+
         # Respect manual stop; do not auto-start until user starts explicitly
         global _mcp_user_stopped
         if _mcp_user_stopped:
@@ -292,9 +306,6 @@ def _ensure_status_indicator():
                                     bv = vf.getCurrentBinaryView()
                         except Exception:
                             bv = None
-                        if not bv:
-                            _show_no_bv_popup()
-                            return
                         plugin.start_server(bv)
                 finally:
                     _set_status_indicator(bool(plugin.server and plugin.server.server))
@@ -685,43 +696,37 @@ except Exception as e:
 # Otherwise auto-start without a BV for programmatic use
 try:
     from binaryninjaui import UIContext
-
-    ctx = UIContext.activeContext()
-    if ctx:
-        vf = ctx.getCurrentViewFrame()
-        if vf and hasattr(vf, "getCurrentBinaryView"):
-            bv = vf.getCurrentBinaryView()
-            if bv:
-                _try_autostart_for_bv(bv)
-    # Schedule a few retries on the UI thread to catch late BV availability
+    # Attempt immediate auto-start
+    _try_autostart_no_bv()
+    
+    # Schedule retries on the UI thread to catch late UI readiness or BV availability
     try:
         import binaryninjaui as ui
         from PySide6.QtCore import QTimer
 
         def _kick_autostart():
             try:
+                # If already started, this will just log/skip
+                _try_autostart_no_bv()
+                
                 ctx2 = UIContext.activeContext()
                 if ctx2:
                     vf2 = ctx2.getCurrentViewFrame()
                     if vf2 and hasattr(vf2, "getCurrentBinaryView"):
                         bv2 = vf2.getCurrentBinaryView()
                         if bv2:
-                            _try_autostart_for_bv(bv2)
-                        else:
-                            # No BV open, but try to auto-start anyway for programmatic use
-                            _try_autostart_no_bv()
-                    else:
-                        # No view frame, try auto-start without BV
-                        _try_autostart_no_bv()
-                else:
-                    # No context, try auto-start without BV
-                    _try_autostart_no_bv()
+                            # If server started without BV, register this one
+                            if plugin.server and plugin.server.binary_ops:
+                                plugin.server.binary_ops.register_view(bv2)
+                                if plugin.server.binary_ops.current_view is None:
+                                    plugin.server.binary_ops.current_view = bv2
+
                 # also ensure status control exists after UI is fully ready
                 _schedule_status_init()
             except Exception as _e:
                 bn.log_debug(f"MCP Max auto-start retry error: {_e}")
 
-        for delay in (200, 500, 1000, 1500, 2000):
+        for delay in (200, 500, 1000, 2000):
             ui.execute_on_main_thread(lambda d=delay: QTimer.singleShot(d, _kick_autostart))
     except Exception:
         pass
