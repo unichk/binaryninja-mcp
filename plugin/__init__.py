@@ -14,32 +14,36 @@ class BinaryNinjaMCP:
         self.config = Config()
         self.server = MCPServer(self.config)
 
-    def start_server(self, bv):
+    def start_server(self, bv, show_popup_on_error=True):
         try:
-            # Require an active BinaryView (match menu behavior)
-            if bv is None:
-                bn.log_debug("MCP Max start requested but no BinaryView is active; deferring")
-                _show_no_bv_popup()
-                return
             # Avoid duplicate starts
             if self.server and self.server.server:
                 bn.log_info("MCP Max server already running; skip new start")
-                # Ensure BV is set if not already
-                if self.server.binary_ops.current_view is None:
-                    self.server.binary_ops.current_view = bv
-                else:
-                    # Register any newly seen view even if server is already running
-                    try:
-                        self.server.binary_ops.register_view(bv)
-                    except Exception:
-                        pass
-                _show_popup("MCP Server", "Server is already running.")
+                # Register BinaryView if provided
+                if bv is not None:
+                    if self.server.binary_ops.current_view is None:
+                        self.server.binary_ops.current_view = bv
+                    else:
+                        # Register any newly seen view even if server is already running
+                        try:
+                            self.server.binary_ops.register_view(bv)
+                        except Exception:
+                            pass
+                if show_popup_on_error:
+                    _show_popup("MCP Server", "Server is already running.")
                 return
-            self.server.binary_ops.current_view = bv
-            try:
-                self.server.binary_ops.register_view(bv)
-            except Exception:
-                pass
+            
+            # If BinaryView provided, use it; otherwise start with None (for auto-start)
+            if bv is not None:
+                self.server.binary_ops.current_view = bv
+                try:
+                    self.server.binary_ops.register_view(bv)
+                except Exception:
+                    pass
+            else:
+                # Starting without a BinaryView (auto-start case)
+                self.server.binary_ops.current_view = None
+            
             self.server.start()
             global _mcp_user_stopped
             _mcp_user_stopped = False
@@ -47,13 +51,15 @@ class BinaryNinjaMCP:
                 f"MCP server started successfully on http://{self.config.server.host}:{self.config.server.port}"
             )
             _set_status_indicator(True)
-            _show_popup(
-                "MCP Server Started",
-                f"Running at http://{self.config.server.host}:{self.config.server.port}",
-            )
+            if show_popup_on_error:
+                _show_popup(
+                    "MCP Server Started",
+                    f"Running at http://{self.config.server.host}:{self.config.server.port}",
+                )
         except Exception as e:
             bn.log_error(f"Failed to start MCP server: {e!s}")
-            _show_popup("MCP Server Error", f"Failed to start: {e}")
+            if show_popup_on_error:
+                _show_popup("MCP Server Error", f"Failed to start: {e}")
 
     def stop_server(self, bv):
         try:
@@ -97,32 +103,6 @@ def _apply_settings_to_config():
     return
 
 
-# Auto-start the MCP server on plugin initialization (without requiring a binary view)
-def _autostart_on_load():
-    """Auto-start the server when the plugin loads, without requiring an open binary."""
-    try:
-        import time
-        # Give Binary Ninja a moment to fully initialize
-        time.sleep(0.5)
-        _try_autostart_no_bv()
-    except Exception as e:
-        bn.log_debug(f"MCP Max auto-start on load failed: {e}")
-
-
-# Attempt auto-start immediately in headless mode, or defer to UI context in GUI mode
-try:
-    import binaryninjaui as ui
-    # GUI mode: defer to UI thread
-    try:
-        ui.execute_on_main_thread(_autostart_on_load)
-    except Exception:
-        _autostart_on_load()
-except ImportError:
-    # Headless mode: start immediately
-    _autostart_on_load()
-
-
-
 def _try_autostart_for_bv(bv):
     try:
         # Respect manual stop; do not auto-start until user starts explicitly
@@ -145,13 +125,8 @@ def _try_autostart_no_bv():
             return
         # Start with no binary view; allow users to load one via MCP tools
         if plugin.server and not plugin.server.server:
-            plugin.server.binary_ops.current_view = None
-            plugin.server.start()
-            _mcp_user_stopped = False
-            bn.log_info(
-                f"MCP server auto-started on app launch at http://{plugin.config.server.host}:{plugin.config.server.port}"
-            )
-            _set_status_indicator(True)
+            plugin.start_server(None, show_popup_on_error=False)
+            bn.log_info("MCP server auto-started on app launch")
     except Exception as e:
         bn.log_error(f"MCP Max autostart (no BV) failed: {e}")
 
@@ -707,6 +682,7 @@ except Exception as e:
     bn.log_debug(f"MCP Max UI notifications not installed: {e}")
 
 # Attempt an immediate autostart if a BV is already open (e.g., .bndb loaded)
+# Otherwise auto-start without a BV for programmatic use
 try:
     from binaryninjaui import UIContext
 
@@ -731,6 +707,15 @@ try:
                         bv2 = vf2.getCurrentBinaryView()
                         if bv2:
                             _try_autostart_for_bv(bv2)
+                        else:
+                            # No BV open, but try to auto-start anyway for programmatic use
+                            _try_autostart_no_bv()
+                    else:
+                        # No view frame, try auto-start without BV
+                        _try_autostart_no_bv()
+                else:
+                    # No context, try auto-start without BV
+                    _try_autostart_no_bv()
                 # also ensure status control exists after UI is fully ready
                 _schedule_status_init()
             except Exception as _e:
@@ -741,7 +726,8 @@ try:
     except Exception:
         pass
 except Exception:
-    pass
+    # Headless mode - try auto-start without BV
+    _try_autostart_no_bv()
 
 
 def _is_server_running() -> bool:
