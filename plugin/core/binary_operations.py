@@ -64,8 +64,12 @@ class BinaryOperations:
                     # 2. Find and activate existing ViewFrame for this BinaryView
                     found_frame = None
                     try:
-                        main_window = context.mainWindow()
-                        if main_window:
+                        # Iterate through all UI contexts to find the tab
+                        for ctx in binaryninjaui.UIContext.allContexts():
+                            main_window = ctx.mainWindow()
+                            if not main_window:
+                                continue
+                                
                             frames = main_window.findChildren(binaryninjaui.ViewFrame)
                             for frame in frames:
                                 fbv = frame.getCurrentBinaryView()
@@ -73,36 +77,43 @@ class BinaryOperations:
                                     frame_path = _os.path.realpath(fbv.file.filename)
                                     if frame_path == target_path:
                                         found_frame = frame
+                                        context = ctx # Use the context where the frame was found
                                         break
-                                # Final backup check by object identity
                                 if fbv is bv:
                                     found_frame = frame
+                                    context = ctx
                                     break
+                            if found_frame:
+                                break
                     except Exception as e:
-                        bn.log_debug(f"Search for ViewFrame via findChildren failed: {e}")
+                        bn.log_debug(f"Global search for ViewFrame failed: {e}")
 
                     if found_frame:
-                        # 3. Use the EXACT path BN already uses for this tab to focus it
-                        # This is much more reliable than manual frame activation
-                        existing_path = found_frame.getCurrentBinaryView().file.filename
-                        bn.log_info(f"Found existing tab for {target_path} at {existing_path}, focusing")
+                        bn.log_info(f"Found existing tab for {target_path}, performing aggressive activation")
                         try:
-                            context.openFilename(existing_path)
-                            # Success! We return here to prevent redundant openFilename calls
-                            return
-                        except Exception as e:
-                            bn.log_warn(f"Focusing existing tab via openFilename failed: {e}")
-                            # If for some reason that failed, try manual activation as backup
+                            # 1. Primary context activation
                             if hasattr(context, "activateViewFrame"):
                                 context.activateViewFrame(found_frame)
-                            elif hasattr(found_frame, "setFocus"):
+                            
+                            # 2. Individual frame focus/raise
+                            if hasattr(found_frame, "setFocus"):
                                 found_frame.setFocus()
-                                if hasattr(found_frame, "raise_"):
-                                    found_frame.raise_()
-                            return
+                            if hasattr(found_frame, "raise_"):
+                                found_frame.raise_()
+                                
+                            # 3. Final resort: context show
+                            if hasattr(context, "show"):
+                                context.show()
+                        except Exception as e:
+                            bn.log_warn(f"Aggressive UI activation failed: {e}")
+                        
+                        # CRITICAL: We found the tab, so we MUST NOT call openFilename.
+                        # This is the "kill switch" for redundant tabs.
+                        bn.log_info(f"Tab activation sequence complete for {target_path}. Skipping openFilename.")
+                        return
                     
-                    # 4. Last-resort: ONLY if NO frame exists for this path
-                    bn.log_info(f"No existing tab found for {target_path}, calling openFilename for the first time")
+                    # 4. Last-resort fallback: ONLY if NO tab exists for this path
+                    bn.log_info(f"No existing tab found for {target_path}. Calling openFilename for the first time.")
                     context.openFilename(target_path)
 
                 if hasattr(bn, "mainthread") and hasattr(bn.mainthread, "execute_on_main_thread"):
