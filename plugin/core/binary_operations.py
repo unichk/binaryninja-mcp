@@ -39,21 +39,38 @@ class BinaryOperations:
             # Attempt to switch UI tab to match selection
             try:
                 import binaryninjaui
+                import os as _os
+
                 def _switch_ui_tab():
                     bn.log_info(f"Checking UI focus for {filepath}")
                     contexts = binaryninjaui.UIContext.allContexts()
-                    if contexts:
-                        context = contexts[0]
-                        # PREVENT LOOP: Check if this file is already active in the UI
-                        view_frame = context.getCurrentViewFrame()
-                        if view_frame:
-                            current_bv = view_frame.getCurrentBinaryView()
-                            if current_bv and current_bv.file.filename == filepath:
-                                bn.log_debug(f"UI already focused on {filepath}, skipping switch")
-                                return
-                        
-                        bn.log_info(f"Switching UI focus to {filepath}")
-                        context.openFilename(filepath)
+                    if not contexts:
+                        return
+                    context = contexts[0]
+                    
+                    # 1. Check if already active
+                    view_frame = context.getCurrentViewFrame()
+                    if view_frame:
+                        current_bv = view_frame.getCurrentBinaryView()
+                        if current_bv and current_bv.file.filename == filepath:
+                            bn.log_debug(f"UI already focused on {filepath}, skipping switch")
+                            return
+                    
+                    # 2. Try to find existing ViewFrame for this BinaryView and activate it
+                    # This is better than openFilename which might re-open/duplicate
+                    target_frame = binaryninjaui.ViewFrame.getViewFrame(bv)
+                    if target_frame:
+                        bn.log_info(f"Found existing ViewFrame for {filepath}, activating")
+                        if hasattr(context, "activateViewFrame"):
+                            context.activateViewFrame(target_frame)
+                            return
+                        # Fallback: if activateViewFrame is missing, try openFilename which SHOULD focus
+                    
+                    # 3. Fallback: use openFilename (focuses if already open, usually)
+                    # Use absolute path to avoid ambiguity
+                    abs_path = _os.path.abspath(filepath)
+                    bn.log_info(f"Switching UI focus to {abs_path}")
+                    context.openFilename(abs_path)
 
                 if hasattr(bn, "mainthread") and hasattr(bn.mainthread, "execute_on_main_thread"):
                     bn.mainthread.execute_on_main_thread(_switch_ui_tab)
