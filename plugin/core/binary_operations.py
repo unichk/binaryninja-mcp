@@ -91,24 +91,30 @@ class BinaryOperations:
                     if found_frame:
                         bn.log_info(f"Found existing tab for {target_path}, performing aggressive activation")
                         try:
-                            # 1. Primary context activation
+                            # 1. Try high-level Tab activation if available
+                            if hasattr(context, "activateTab"):
+                                # ViewFrame usually IS the tab widget or contained in it
+                                context.activateTab(found_frame)
+                            
+                            # 2. Try ViewFrame activation
                             if hasattr(context, "activateViewFrame"):
                                 context.activateViewFrame(found_frame)
                             
-                            # 2. Individual frame focus/raise
+                            # 3. Individual frame focus/raise
                             if hasattr(found_frame, "setFocus"):
                                 found_frame.setFocus()
                             if hasattr(found_frame, "raise_"):
                                 found_frame.raise_()
                                 
-                            # 3. Final resort: context show
+                            # 4. Final resort: context show
                             if hasattr(context, "show"):
                                 context.show()
+                                
                         except Exception as e:
-                            bn.log_warn(f"Aggressive UI activation failed: {e}")
+                            bn.log_warn(f"UI activation sequence failed: {e}")
                         
                         # CRITICAL: We found the tab, so we MUST NOT call openFilename.
-                        # This is the "kill switch" for redundant tabs.
+                        # This avoids creating redundant tabs.
                         bn.log_info(f"Tab activation sequence complete for {target_path}. Skipping openFilename.")
                         return
                     
