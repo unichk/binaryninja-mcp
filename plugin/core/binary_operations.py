@@ -61,64 +61,81 @@ class BinaryOperations:
                                 bn.log_debug(f"UI already focused on {target_path}, skipping switch")
                                 return
                     
-                    # 2. Find and activate existing ViewFrame for this BinaryView
+                    # 2. Find and activate existing tab/ViewFrame for this BinaryView
                     found_frame = None
+                    found_tab = None
                     try:
                         # Iterate through all UI contexts to find the tab
                         for ctx in binaryninjaui.UIContext.allContexts():
+                            # A. Try high-level Tab search first
+                            if hasattr(ctx, "getTabs"):
+                                for tab in ctx.getTabs():
+                                    try:
+                                        # Many tab widgets are ViewFrames or clones
+                                        if hasattr(tab, "getCurrentBinaryView"):
+                                            fbv = tab.getCurrentBinaryView()
+                                            if fbv:
+                                                frame_path = _os.path.realpath(fbv.file.filename)
+                                                if frame_path == target_path or fbv is bv:
+                                                    found_frame = tab
+                                                    found_tab = tab
+                                                    context = ctx
+                                                    break
+                                    except Exception:
+                                        continue
+                            if found_frame:
+                                break
+
+                            # B. Fallback to ViewFrame child search
                             main_window = ctx.mainWindow()
-                            if not main_window:
-                                continue
-                                
-                            frames = main_window.findChildren(binaryninjaui.ViewFrame)
-                            for frame in frames:
-                                fbv = frame.getCurrentBinaryView()
-                                if fbv:
-                                    frame_path = _os.path.realpath(fbv.file.filename)
-                                    if frame_path == target_path:
-                                        found_frame = frame
-                                        context = ctx # Use the context where the frame was found
-                                        break
-                                if fbv is bv:
-                                    found_frame = frame
-                                    context = ctx
-                                    break
+                            if main_window:
+                                frames = main_window.findChildren(binaryninjaui.ViewFrame)
+                                for frame in frames:
+                                    fbv = frame.getCurrentBinaryView()
+                                    if fbv:
+                                        frame_path = _os.path.realpath(fbv.file.filename)
+                                        if frame_path == target_path or fbv is bv:
+                                            found_frame = frame
+                                            context = ctx
+                                            break
                             if found_frame:
                                 break
                     except Exception as e:
-                        bn.log_debug(f"Global search for ViewFrame failed: {e}")
+                        bn.log_debug(f"Global search for UI element failed: {e}")
 
                     if found_frame:
-                        bn.log_info(f"Found existing tab for {target_path}, performing aggressive activation")
+                        bn.log_info(f"Found existing UI element for {target_path}, performing exhaustive activation")
                         try:
-                            # 1. Try high-level Tab activation if available
-                            if hasattr(context, "activateTab"):
-                                # ViewFrame usually IS the tab widget or contained in it
-                                context.activateTab(found_frame)
+                            # 1. Activate Tab (High-level UI layout switch)
+                            if found_tab and hasattr(context, "activateTab"):
+                                context.activateTab(found_tab)
                             
-                            # 2. Try ViewFrame activation
+                            # 2. Activate ViewFrame (Component activation)
                             if hasattr(context, "activateViewFrame"):
                                 context.activateViewFrame(found_frame)
                             
-                            # 3. Individual frame focus/raise
+                            # 3. Aggressive Window/Widget Focus (OS & Qt signals)
                             if hasattr(found_frame, "setFocus"):
                                 found_frame.setFocus()
                             if hasattr(found_frame, "raise_"):
                                 found_frame.raise_()
+                            if hasattr(found_frame, "activateWindow"):
+                                found_frame.activateWindow()
                                 
-                            # 4. Final resort: context show
-                            if hasattr(context, "show"):
-                                context.show()
+                            # 4. Main Window Focus
+                            main_window = context.mainWindow()
+                            if main_window and hasattr(main_window, "activateWindow"):
+                                main_window.activateWindow()
                                 
                         except Exception as e:
-                            bn.log_warn(f"UI activation sequence failed: {e}")
+                            bn.log_warn(f"Exhaustive UI activation sequence failed: {e}")
                         
                         # CRITICAL: We found the tab, so we MUST NOT call openFilename.
                         # This avoids creating redundant tabs.
-                        bn.log_info(f"Tab activation sequence complete for {target_path}. Skipping openFilename.")
+                        bn.log_info(f"UI swap sequence complete for {target_path}. Skipping openFilename.")
                         return
                     
-                    # 4. Last-resort fallback: ONLY if NO tab exists for this path
+                    # 3. Last-resort fallback: ONLY if NO tab exists for this path
                     bn.log_info(f"No existing tab found for {target_path}. Calling openFilename for the first time.")
                     context.openFilename(target_path)
 
