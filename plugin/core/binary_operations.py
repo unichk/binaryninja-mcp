@@ -48,7 +48,7 @@ class BinaryOperations:
                         return
                     context = contexts[0]
                     
-                    # 1. Check if already active
+                    # 1. Check if already active to skip redundant work
                     view_frame = context.getCurrentViewFrame()
                     if view_frame:
                         current_bv = view_frame.getCurrentBinaryView()
@@ -56,20 +56,30 @@ class BinaryOperations:
                             bn.log_debug(f"UI already focused on {filepath}, skipping switch")
                             return
                     
-                    # 2. Try to find existing ViewFrame for this BinaryView and activate it
-                    # This is better than openFilename which might re-open/duplicate
-                    target_frame = binaryninjaui.ViewFrame.getViewFrame(bv)
-                    if target_frame:
+                    # 2. Find and activate existing ViewFrame for this BinaryView
+                    # getViewFrame is unreliable/missing in some versions
+                    found_frame = None
+                    try:
+                        # Search for all ViewFrame children of the main window
+                        main_window = context.mainWindow()
+                        if main_window:
+                            frames = main_window.findChildren(binaryninjaui.ViewFrame)
+                            for frame in frames:
+                                if frame.getCurrentBinaryView() is bv:
+                                    found_frame = frame
+                                    break
+                    except Exception as e:
+                        bn.log_debug(f"Search for ViewFrame via findChildren failed: {e}")
+
+                    if found_frame:
                         bn.log_info(f"Found existing ViewFrame for {filepath}, activating")
                         if hasattr(context, "activateViewFrame"):
-                            context.activateViewFrame(target_frame)
+                            context.activateViewFrame(found_frame)
                             return
-                        # Fallback: if activateViewFrame is missing, try openFilename which SHOULD focus
                     
-                    # 3. Fallback: use openFilename (focuses if already open, usually)
-                    # Use absolute path to avoid ambiguity
+                    # 3. Last-resort fallback: use openFilename (focuses if already open)
                     abs_path = _os.path.abspath(filepath)
-                    bn.log_info(f"Switching UI focus to {abs_path}")
+                    bn.log_info(f"Switching UI focus to {abs_path} via openFilename")
                     context.openFilename(abs_path)
 
                 if hasattr(bn, "mainthread") and hasattr(bn.mainthread, "execute_on_main_thread"):
