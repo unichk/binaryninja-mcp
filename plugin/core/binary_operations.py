@@ -42,7 +42,10 @@ class BinaryOperations:
                 import os as _os
 
                 def _switch_ui_tab():
-                    bn.log_info(f"Checking UI focus for {filepath}")
+                    # Canonicalize target path to handle symlinks/aliases
+                    target_path = _os.path.realpath(filepath)
+                    bn.log_info(f"Checking UI focus for {target_path}")
+                    
                     contexts = binaryninjaui.UIContext.allContexts()
                     if not contexts:
                         return
@@ -52,35 +55,41 @@ class BinaryOperations:
                     view_frame = context.getCurrentViewFrame()
                     if view_frame:
                         current_bv = view_frame.getCurrentBinaryView()
-                        if current_bv and current_bv.file.filename == filepath:
-                            bn.log_debug(f"UI already focused on {filepath}, skipping switch")
-                            return
+                        if current_bv:
+                            current_path = _os.path.realpath(current_bv.file.filename)
+                            if current_path == target_path:
+                                bn.log_debug(f"UI already focused on {target_path}, skipping switch")
+                                return
                     
                     # 2. Find and activate existing ViewFrame for this BinaryView
-                    # getViewFrame is unreliable/missing in some versions
                     found_frame = None
                     try:
-                        # Search for all ViewFrame children of the main window
                         main_window = context.mainWindow()
                         if main_window:
                             frames = main_window.findChildren(binaryninjaui.ViewFrame)
                             for frame in frames:
-                                if frame.getCurrentBinaryView() is bv:
+                                fbv = frame.getCurrentBinaryView()
+                                if fbv:
+                                    frame_path = _os.path.realpath(fbv.file.filename)
+                                    if frame_path == target_path:
+                                        found_frame = frame
+                                        break
+                                # Fallback to object identity if available
+                                if fbv is bv:
                                     found_frame = frame
                                     break
                     except Exception as e:
                         bn.log_debug(f"Search for ViewFrame via findChildren failed: {e}")
 
                     if found_frame:
-                        bn.log_info(f"Found existing ViewFrame for {filepath}, activating")
+                        bn.log_info(f"Found existing ViewFrame for {target_path}, activating")
                         if hasattr(context, "activateViewFrame"):
                             context.activateViewFrame(found_frame)
                             return
                     
                     # 3. Last-resort fallback: use openFilename (focuses if already open)
-                    abs_path = _os.path.abspath(filepath)
-                    bn.log_info(f"Switching UI focus to {abs_path} via openFilename")
-                    context.openFilename(abs_path)
+                    bn.log_info(f"Switching UI focus to {target_path} via openFilename")
+                    context.openFilename(target_path)
 
                 if hasattr(bn, "mainthread") and hasattr(bn.mainthread, "execute_on_main_thread"):
                     bn.mainthread.execute_on_main_thread(_switch_ui_tab)
