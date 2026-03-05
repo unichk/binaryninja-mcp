@@ -216,7 +216,7 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         try:
-            # For all endpoints except /status, /convertNumber, /platforms, /binaries, /views, /selectBinary, check loaded
+            # For all endpoints except /status, /convertNumber, /platforms, /binaries, /views, /selectBinary, /loadBinary, /closeBinary, check loaded
             if (
                 not (
                     self.path.startswith("/status")
@@ -225,6 +225,8 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
                     or self.path.startswith("/binaries")
                     or self.path.startswith("/views")
                     or self.path.startswith("/selectBinary")
+                    or self.path.startswith("/loadBinary")
+                    or self.path.startswith("/closeBinary")
                 )
                 and not self._check_binary_loaded()
             ):
@@ -286,6 +288,62 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
                     )
                 else:
                     self._send_json_response(self.endpoints.select_binary(ident))
+
+            elif path == "/loadBinary":
+                file_path = params.get("path") or params.get("file") or params.get("filepath")
+                if not file_path:
+                    self._send_json_response(
+                        {
+                            "error": "Missing parameter",
+                            "help": "Use ?path=<file_path>",
+                        },
+                        400,
+                    )
+                else:
+                    try:
+                        bv = self.binary_ops.load_binary(file_path)
+                        self._send_json_response({
+                            "status": "ok",
+                            "filename": bv.file.filename if bv else None,
+                            "message": f"Successfully loaded {file_path}"
+                        })
+                    except Exception as e:
+                        bn.log_error(f"Error loading binary: {e}")
+                        self._send_json_response({"error": str(e)}, 500)
+
+            elif path == "/closeBinary":
+                ident = (
+                    params.get("view")
+                    or params.get("binary")
+                    or params.get("id")
+                    or params.get("file")
+                )
+                if not ident:
+                    self._send_json_response(
+                        {
+                            "error": "Missing parameter",
+                            "help": "Use ?view=<id|filename> to close a binary",
+                        },
+                        400,
+                    )
+                else:
+                    try:
+                        view_info = self.binary_ops.select_view(ident)
+                        if not view_info:
+                            self._send_json_response({
+                                "error": f"Binary not found: {ident}",
+                                "available": self.endpoints.list_binaries().get("binaries", []),
+                            }, 404)
+                        else:
+                            filename = view_info.get("filename")
+                            self.binary_ops.unregister_by_filename(filename)
+                            self._send_json_response({
+                                "status": "ok",
+                                "message": f"Successfully closed {filename}"
+                            })
+                    except Exception as e:
+                        bn.log_error(f"Error closing binary: {e}")
+                        self._send_json_response({"error": str(e)}, 500)
 
             elif path == "/exports":
                 exports = self.endpoints.get_exports(offset, limit)

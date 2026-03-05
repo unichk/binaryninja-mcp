@@ -660,6 +660,38 @@ def select_binary(view: str) -> str:
 
 
 @mcp.tool()
+def load_binary(path: str) -> str:
+    """
+    Load a binary file from a file path into Binary Ninja.
+    """
+    data = get_json("loadBinary", {"path": path})
+    if not data:
+        return "Error: no response"
+    if isinstance(data, dict) and data.get("error"):
+        return f"Error loading binary: {data.get('error')}"
+    if isinstance(data, dict) and data.get("status") == "ok":
+        return data.get("message", f"Successfully loaded {path}")
+    return str(data)
+
+
+@mcp.tool()
+def close_binary(view: str) -> str:
+    """
+    Close an open binary in Binary Ninja by ordinal, view id, full path, or basename.
+    Use list_binaries to see available binaries.
+    """
+    data = get_json("closeBinary", {"view": view})
+    if not data:
+        return "Error: no response"
+    if isinstance(data, dict) and data.get("error"):
+        import json as _json
+        return _json.dumps(data, indent=2, ensure_ascii=False)
+    if isinstance(data, dict) and data.get("status") == "ok":
+        return data.get("message", f"Successfully closed binary: {view}")
+    return str(data)
+
+
+@mcp.tool()
 def delete_comment(address: str) -> str:
     """
     Delete the comment at a specific address.

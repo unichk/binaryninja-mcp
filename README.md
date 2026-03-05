@@ -91,9 +91,51 @@ Note: Replace `/ABSOLUTE/PATH/TO` with the actual absolute path to your project 
 
 ## Usage
 
-1. Open Binary Ninja and load a binary
-2. Click the button shown at left bottom corner
+The MCP server **automatically starts when Binary Ninja launches**. You can begin using it immediately through your MCP client without manual setup.
+
+### Getting Started
+
+1. Open Binary Ninja (the MCP server will auto-start)
+2. Optionally, use the MCP tools to load a binary file programmatically
 3. Start using it through your MCP client
+
+### Available Tools
+
+Once the server is running, you have access to the following tools for managing binaries:
+
+- **`load_binary(path)`** - Load a binary file from a file path into Binary Ninja
+- **`list_binaries()`** - List all currently open binaries (useful before switching or closing)
+- **`switch_binary(view)`** - Switch between already-open binaries by id, filename, or basename
+- **`close_binary(view)`** - Close an open binary
+
+You can also manually open and close binaries using the Binary Ninja UI, and the MCP server will track them automatically.
+
+### Manual Server Control
+
+- **Start/Stop button**: Located in the status bar at the bottom-left corner of Binary Ninja
+- **Menu**: Use `MCP Server > Start MCP Server` or `MCP Server > Stop MCP Server` from the plugins menu
+
+### Example: Programmatic Binary Loading
+
+Instead of manually opening files in Binary Ninja, you can now load them directly through the MCP:
+
+```
+# List currently open binaries
+list_binaries()
+
+# Load a new binary
+load_binary("/path/to/binary")
+
+# Switch to a specific binary (by ordinal, filename, or basename)
+switch_binary("1")
+# or
+switch_binary("/path/to/binary")
+
+# Close a binary
+close_binary("1")
+```
+
+### Analyzing Binaries
 
 You may now start prompting LLMs about the currently open binary (or binaries). Example prompts:
 
@@ -157,6 +199,8 @@ The following table lists the available MCP functions for use:
 | `list_platforms()`                                                   | List all available platform names.                                                                           |
 | `list_binaries()`                                                    | List managed/open binaries with ids and active flag.                                                         |
 | `select_binary(view)`                                                | Select active binary by id or filename.                                                                      |
+| `load_binary(path)`                                                  | Load a binary file from a file path into Binary Ninja.                                                       |
+| `close_binary(view)`                                                 | Close an open binary by id, filename, or basename.                                                           |
 | `list_all_strings()`                                                 | List all strings (no pagination; aggregates all pages).                                                      |
 | `list_classes`                                                       | List all namespace/class names in the program.                                                               |
 | `list_data_items`                                                    | List defined data labels and their values.                                                                   |
@@ -193,6 +237,8 @@ These are the list of HTTP endpoints that can be called:
 - `/platforms`: List all available platform names.
 - `/binaries` or `/views`: List managed/open binaries with ids and active flag.
 - `/selectBinary?view=<id|filename>`: Select active binary for subsequent operations.
+- `/loadBinary?path=<file_path>`: Load a binary file from a file path into Binary Ninja.
+- `/closeBinary?view=<id|filename>`: Close an open binary.
 - `/data?offset=<n>&limit=<m>&length=<n>`: Defined data items with previews. `length` controls bytes read per item (capped at defined size). Default behavior reads exact defined size when available; `length=-1` forces exact-size.
 - `/getXrefsToEnum?name=<enum>`: Enum usages by matching member constants.
 - `/getXrefsToField?struct=<name>&field=<name>`: Xrefs to struct field.

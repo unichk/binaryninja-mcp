@@ -97,6 +97,32 @@ def _apply_settings_to_config():
     return
 
 
+# Auto-start the MCP server on plugin initialization (without requiring a binary view)
+def _autostart_on_load():
+    """Auto-start the server when the plugin loads, without requiring an open binary."""
+    try:
+        import time
+        # Give Binary Ninja a moment to fully initialize
+        time.sleep(0.5)
+        _try_autostart_no_bv()
+    except Exception as e:
+        bn.log_debug(f"MCP Max auto-start on load failed: {e}")
+
+
+# Attempt auto-start immediately in headless mode, or defer to UI context in GUI mode
+try:
+    import binaryninjaui as ui
+    # GUI mode: defer to UI thread
+    try:
+        ui.execute_on_main_thread(_autostart_on_load)
+    except Exception:
+        _autostart_on_load()
+except ImportError:
+    # Headless mode: start immediately
+    _autostart_on_load()
+
+
+
 def _try_autostart_for_bv(bv):
     try:
         # Respect manual stop; do not auto-start until user starts explicitly
@@ -107,6 +133,27 @@ def _try_autostart_for_bv(bv):
         plugin.start_server(bv)
     except Exception as e:
         bn.log_error(f"MCP Max autostart failed: {e}")
+
+
+def _try_autostart_no_bv():
+    """Auto-start the server without requiring an open binary view."""
+    try:
+        # Respect manual stop; do not auto-start until user starts explicitly
+        global _mcp_user_stopped
+        if _mcp_user_stopped:
+            bn.log_debug("MCP Max autostart (no BV) suppressed due to manual stop")
+            return
+        # Start with no binary view; allow users to load one via MCP tools
+        if plugin.server and not plugin.server.server:
+            plugin.server.binary_ops.current_view = None
+            plugin.server.start()
+            _mcp_user_stopped = False
+            bn.log_info(
+                f"MCP server auto-started on app launch at http://{plugin.config.server.host}:{plugin.config.server.port}"
+            )
+            _set_status_indicator(True)
+    except Exception as e:
+        bn.log_error(f"MCP Max autostart (no BV) failed: {e}")
 
 
 def _show_popup(title: str, text: str, info: bool = True):
