@@ -82,13 +82,33 @@ class BinaryOperations:
                         bn.log_debug(f"Search for ViewFrame via findChildren failed: {e}")
 
                     if found_frame:
-                        bn.log_info(f"Found existing ViewFrame for {target_path}, activating")
-                        if hasattr(context, "activateViewFrame"):
-                            context.activateViewFrame(found_frame)
-                            return
+                        bn.log_info(f"Found existing ViewFrame for {target_path}, attempting activation")
+                        activated = False
+                        
+                        # Try multiple activation strategies
+                        try:
+                            if hasattr(context, "activateViewFrame"):
+                                context.activateViewFrame(found_frame)
+                                activated = True
+                            elif hasattr(found_frame, "setFocus"):
+                                found_frame.setFocus()
+                                if hasattr(found_frame, "raise_"):
+                                    found_frame.raise_()
+                                activated = True
+                        except Exception as e:
+                            bn.log_warn(f"UI activation strategy failed: {e}")
+                        
+                        # CRITICAL: If we found the frame, NEVER fall back to openFilename
+                        # even if activation failed to bring it to top. 
+                        # This prevents the redundant tab creation.
+                        if activated:
+                            bn.log_info(f"Successfully activated existing tab for {target_path}")
+                        else:
+                            bn.log_warn(f"Found tab for {target_path} but couldn't focus it. Skipping openFilename to prevent duplication.")
+                        return
                     
-                    # 3. Last-resort fallback: use openFilename (focuses if already open)
-                    bn.log_info(f"Switching UI focus to {target_path} via openFilename")
+                    # 3. Last-resort fallback: ONLY if NO frame exists for this path
+                    bn.log_info(f"No existing tab for {target_path}, calling openFilename")
                     context.openFilename(target_path)
 
                 if hasattr(bn, "mainthread") and hasattr(bn.mainthread, "execute_on_main_thread"):
