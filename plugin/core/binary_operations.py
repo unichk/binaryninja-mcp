@@ -29,8 +29,12 @@ class BinaryOperations:
     def current_view(self, bv: bn.BinaryView | None):
         self._current_view = bv
         if bv:
+            import os as _os
             filepath = bv.file.filename
-            bn.log_info(f"Set current binary view: {filepath}")
+            # Canonicalize for consistent comparison
+            target_path = _os.path.realpath(filepath)
+            bn.log_info(f"Set current binary view: {target_path}")
+            
             try:
                 self._register_view(bv)
             except Exception:
@@ -39,13 +43,9 @@ class BinaryOperations:
             # Attempt to switch UI tab to match selection
             try:
                 import binaryninjaui
-                import os as _os
 
                 def _switch_ui_tab():
-                    # Canonicalize target path to handle symlinks/aliases
-                    target_path = _os.path.realpath(filepath)
                     bn.log_info(f"Checking UI focus for {target_path}")
-                    
                     contexts = binaryninjaui.UIContext.allContexts()
                     if not contexts:
                         return
@@ -74,7 +74,7 @@ class BinaryOperations:
                                     if frame_path == target_path:
                                         found_frame = frame
                                         break
-                                # Fallback to object identity if available
+                                # Final backup check by object identity
                                 if fbv is bv:
                                     found_frame = frame
                                     break
@@ -104,17 +104,22 @@ class BinaryOperations:
 
     def load_binary(self, filepath: str) -> bn.BinaryView:
         """Load a binary file while preventing redundant opens and double-loading."""
+        import os as _os
+        # Canonicalize input path immediately to resolve symlinks (/bin vs /usr/bin)
+        target_path = _os.path.realpath(filepath)
+        
         # 1. Check if we already have this file open
         self._prune_views()
-        existing_id = self._id_by_filename.get(filepath)
-        if existing_id:
-            w = self._views_by_id.get(existing_id)
-            if w:
-                bv = w()
-                if bv:
-                    bn.log_info(f"File {filepath} already open, returning existing view")
-                    self.current_view = bv
-                    return bv
+        # Search by realpath matching
+        for vid, w in list(self._views_by_id.items()):
+            try:
+                vb = w()
+                if vb and _os.path.realpath(vb.file.filename) == target_path:
+                    bn.log_info(f"File {target_path} already open, returning existing view")
+                    self.current_view = vb
+                    return vb
+            except Exception:
+                continue
 
         self._current_view = None
         try:
@@ -123,11 +128,11 @@ class BinaryOperations:
             try:
                 import binaryninjaui
                 def _open_ui_tab():
-                    bn.log_info(f"Opening {filepath} in UI tab")
+                    bn.log_info(f"Opening {target_path} in UI tab")
                     contexts = binaryninjaui.UIContext.allContexts()
                     if contexts:
                         context = contexts[0]
-                        context.openFilename(filepath)
+                        context.openFilename(target_path)
                     else:
                         bn.log_warn("No UI contexts available to open tab")
 
@@ -144,33 +149,37 @@ class BinaryOperations:
             # 3. Handle BinaryView acquisition
             if ui_success:
                 import time
-                bn.log_info(f"Waiting for {filepath} to be registered via UI...")
+                bn.log_info(f"Waiting for {target_path} to be registered via UI...")
                 max_retries = 30
                 for i in range(max_retries):
                     self._prune_views()
-                    vid = self._id_by_filename.get(filepath)
-                    if vid:
-                        wref = self._views_by_id.get(vid)
-                        bv = wref() if wref else None
-                        if bv:
-                            bn.log_info(f"Discovered {filepath} registered via UI after {i*0.1:.2f}s")
-                            self._current_view = bv
-                            break
+                    # Check again with realpath matching
+                    for vid, w in list(self._views_by_id.items()):
+                        try:
+                            vb = w()
+                            if vb and _os.path.realpath(vb.file.filename) == target_path:
+                                bn.log_info(f"Discovered {target_path} registered via UI after {i*0.1:.2f}s")
+                                self._current_view = vb
+                                break
+                        except Exception:
+                            continue
+                    if self._current_view:
+                        break
                     time.sleep(0.1)
 
             # 4. Fallback: Core loading if UI failed or view wasn't discovered
             if not self._current_view:
-                bn.log_info(f"Loading {filepath} via core API (fallback)")
+                bn.log_info(f"Loading {target_path} via core API (fallback)")
                 if hasattr(bn, "load"):
-                    self._current_view = bn.load(filepath)
+                    self._current_view = bn.load(target_path)
                 elif hasattr(bn, "open_view"):
-                    self._current_view = bn.open_view(filepath)
+                    self._current_view = bn.open_view(target_path)
                 
                 # Double fallback for older versions
                 if not self._current_view:
                     file_metadata = bn.FileMetadata()
                     if hasattr(bn.BinaryViewType, "get_view_of_file_with_options"):
-                        bvt = bn.BinaryViewType.get_view_of_file_with_options(filepath, file_metadata)
+                        bvt = bn.BinaryViewType.get_view_of_file_with_options(target_path, file_metadata)
                         if bvt:
                             self._current_view = bvt.open()
 
